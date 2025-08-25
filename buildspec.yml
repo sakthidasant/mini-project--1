@@ -1,0 +1,50 @@
+version: 0.2
+
+env:
+  variables:
+    EKS_CLUSTER_NAME: brain-tasks-cluster
+    AWS_DEFAULT_REGION: ap-south-1
+    ECR_REPO_NAME: brain-tasks-app
+    ACCOUNT_ID: 551210489378
+
+phases:
+  install:
+    runtime-versions:
+      docker: 20
+    commands:
+      - echo Installing kubectl...
+      - curl -o kubectl https://s3.us-west-2.amazonaws.com/amazon-eks/1.29.0/2024-05-31/bin/linux/amd64/kubectl
+      - chmod +x ./kubectl
+      - mv ./kubectl /usr/local/bin/
+      - echo Installing AWS CLI (if not already)...
+      - which aws || curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+      - unzip -q awscliv2.zip && ./aws/install || true
+      - echo Logging in to ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+
+  pre_build:
+    commands:
+      - echo Setting environment variables...
+      - IMAGE_TAG=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_URI=$ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME:$IMAGE_TAG
+      - echo IMAGE_URI=$IMAGE_URI
+
+  build:
+    commands:
+      - echo Building Docker image...
+      - docker build -t $IMAGE_URI .
+      - docker push $IMAGE_URI
+
+  post_build:
+    commands:
+      - echo Updating kubeconfig...
+      - aws eks update-kubeconfig --region $AWS_DEFAULT_REGION --name $EKS_CLUSTER_NAME
+      - echo Replacing image URI in deployment file...
+      - sed -i "s|IMAGE_URI|$IMAGE_URI|g" deployment/deployment.yaml
+      - echo Applying Kubernetes manifests...
+      - kubectl apply -f deployment/
+
+artifacts:
+  files:
+    - appspec.yml
+    - deployment/*.yaml
