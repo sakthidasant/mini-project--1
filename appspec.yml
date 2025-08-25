@@ -1,0 +1,6 @@
+version: 0.0
+Resources:
+  - KubernetesApp:
+      Type: Kubernetes
+      Properties:
+        TaskDefinition: "deployment/deployment.yaml"
